@@ -174,23 +174,42 @@ static int read_io_stats(io_stats_t *stats)
     while (fgets(line, sizeof(line), diskstats) != NULL) {
         unsigned int major;
         unsigned int minor;
+        unsigned long long reads_completed;
+        unsigned long long reads_merged;
         unsigned long long sectors_read;
+        unsigned long long read_time_ms;
+        unsigned long long writes_completed;
+        unsigned long long writes_merged;
         unsigned long long sectors_written;
+        char device[128];
 
-        /* Estrae i settori letti e scritti ignorando gli altri campi del kernel. */
+        /* Legge i campi fino ai settori scritti, richiesti dal formato diskstats. */
         int fields = sscanf(
             line,
-            "%u %u %*s %*llu %*llu %llu %*llu %*llu %*llu %llu",
+            "%u %u %127s %llu %llu %llu %llu %llu %llu %llu",
             &major,
             &minor,
+            device,
+            &reads_completed,
+            &reads_merged,
             &sectors_read,
+            &read_time_ms,
+            &writes_completed,
+            &writes_merged,
             &sectors_written
         );
-        if (fields != 4) {
+        if (fields != 10) {
             fprintf(stderr, "Formato non valido in /proc/diskstats\n");
             fclose(diskstats);
             return -1;
         }
+
+        (void)device;
+        (void)reads_completed;
+        (void)reads_merged;
+        (void)read_time_ms;
+        (void)writes_completed;
+        (void)writes_merged;
 
         char partition_path[256];
         snprintf(
