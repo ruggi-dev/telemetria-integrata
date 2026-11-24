@@ -14,13 +14,13 @@ typedef struct {
     unsigned long long irq;         // Interruzioni hardware
     unsigned long long softirq;     // Interruzioni software
     unsigned long long steal;       // Attesa hypervisor
-} cpu_times_t;
+} cpu_times_t; // Contiene i contatori CPU accumulati da Linux
 
 typedef struct {
     unsigned long long read_sectors;
     unsigned long long written_sectors;
     unsigned int devices;
-} io_stats_t;
+} io_stats_t; // Contiene i settori letti e scritti
 
 static unsigned long long cpu_total_time(const cpu_times_t *times)
 {
@@ -135,11 +135,9 @@ static int read_cpu_times(cpu_times_t *times)
 
     fclose(stat);
 
-    unsigned long long guest;
-    unsigned long long guest_nice;
     int fields = sscanf(
         line,
-        "cpu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu",
+        "cpu %llu %llu %llu %llu %llu %llu %llu %llu",
         &times->user,
         &times->nice,
         &times->system,
@@ -147,9 +145,7 @@ static int read_cpu_times(cpu_times_t *times)
         &times->iowait,
         &times->irq,
         &times->softirq,
-        &times->steal,
-        &guest,
-        &guest_nice
+        &times->steal
     );
 
     return fields >= 8 ? 0 : -1;
@@ -178,31 +174,19 @@ static int read_io_stats(io_stats_t *stats)
     while (fgets(line, sizeof(line), diskstats) != NULL) {
         unsigned int major;
         unsigned int minor;
-        unsigned long long reads_completed;
-        unsigned long long reads_merged;
         unsigned long long sectors_read;
-        unsigned long long read_time_ms;
-        unsigned long long writes_completed;
-        unsigned long long writes_merged;
         unsigned long long sectors_written;
-        char device[128];
 
-        /* I campi intermedi servono per raggiungere i contatori dei settori. */
+        /* Estrae i settori letti e scritti ignorando gli altri campi del kernel. */
         int fields = sscanf(
             line,
-            "%u %u %127s %llu %llu %llu %llu %llu %llu %llu",
+            "%u %u %*s %*llu %*llu %llu %*llu %*llu %*llu %llu",
             &major,
             &minor,
-            device,
-            &reads_completed,
-            &reads_merged,
             &sectors_read,
-            &read_time_ms,
-            &writes_completed,
-            &writes_merged,
             &sectors_written
         );
-        if (fields != 10) {
+        if (fields != 4) {
             fprintf(stderr, "Formato non valido in /proc/diskstats\n");
             fclose(diskstats);
             return -1;

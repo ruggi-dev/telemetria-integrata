@@ -36,8 +36,10 @@ make
 ./telemetria
 ```
 
-La schermata si aggiorna ogni secondo. Per terminare il programma premi
-`Ctrl+C`.
+Il programma attende 500 ms tra un campione e il successivo e mostra i livelli
+CPU e I/O con i relativi valori. Il throughput I/O usa l'intervallo nominale
+di 500 ms, quindi il tempo di elaborazione può introdurre una lieve
+approssimazione. Per terminare premi `Ctrl+C`.
 
 ## Test del carico
 
