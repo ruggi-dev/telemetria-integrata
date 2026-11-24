@@ -52,11 +52,15 @@ Poi esegui uno dei comandi seguenti in un secondo terminale:
 ```bash
 stress-ng --cpu 0 --timeout 45s --metrics-brief
 stress-ng --hdd 1 --hdd-bytes 512M --temp-path /var/tmp --timeout 45s --metrics-brief
+stress-ng --cpu 2 --hdd 2 --hdd-opts direct,sync --temp-path /var/tmp --timeout 60s
+stress-ng --cpu 0 --hdd 4 --hdd-opts direct,sync --temp-path /var/tmp --timeout 60s
 ```
 
-Il test I/O usa file temporanei fino a 512 MB. In WSL, esegui il test su una
-directory del filesystem Linux, non su un percorso `/mnt/c`, per misurare
-meglio il traffico del disco visto dal programma.
+I primi due comandi provano separatamente CPU e I/O; gli ultimi due generano
+un carico combinato moderato e massimo. Il test I/O usa file temporanei fino a
+512 MB. In WSL, esegui il test su una directory del filesystem Linux, non su
+un percorso `/mnt/c`, per misurare meglio il traffico del disco visto dal
+programma.
 
 ## Pulizia
 
