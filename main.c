@@ -6,10 +6,10 @@
 #include "config.h"
 
 typedef struct {
-    unsigned long long user;        // Modalità utente
-    unsigned long long nice;        // Priorità modificata
-    unsigned long long system;      // Modalità kernel
-    unsigned long long idle;        // Inattività
+    unsigned long long user;        // Modalita' utente
+    unsigned long long nice;        // Priorita' modificata
+    unsigned long long system;      // Modalita' kernel
+    unsigned long long idle;        // Inattivita'
     unsigned long long iowait;      // Attesa I/O
     unsigned long long irq;         // Interruzioni hardware
     unsigned long long softirq;     // Interruzioni software
@@ -162,6 +162,8 @@ int main() {
     cpu_times_t current;
     io_stats_t previous_io;
     io_stats_t current_io;
+    const char spinner[] = {'|', '/', '-', '\\'};
+    unsigned int refresh = 0;
 
     if (read_cpu_times(&previous) != 0) {
         return EXIT_FAILURE;
@@ -203,32 +205,31 @@ int main() {
             ? (100.0 * busy_delta) / total_delta
             : 0.0;
 
-        double sample_seconds = SAMPLE_INTERVAL_MS / 1000.0;
-        double read_mbps =
-            current_io.read_sectors >= previous_io.read_sectors
-            ? (double)(current_io.read_sectors - previous_io.read_sectors)
-                * 512.0 / sample_seconds / 1000000.0
-            : 0.0;
-        double write_mbps =
-            current_io.written_sectors >= previous_io.written_sectors
-            ? (double)(current_io.written_sectors - previous_io.written_sectors)
-                * 512.0 / sample_seconds / 1000000.0
-            : 0.0;
         double io_busy_percent =
             current_io.io_ms >= previous_io.io_ms
             ? 100.0 * (current_io.io_ms - previous_io.io_ms)
                 / (SAMPLE_INTERVAL_MS * current_io.devices)
             : 0.0;
 
+        const char *cpu_level =
+            cpu_usage < CPU_LOAD_LOW_MAX_PERCENT ? "BASSO" :
+            cpu_usage < CPU_LOAD_MEDIUM_MAX_PERCENT ? "MEDIO" : "ALTO";
+        const char *io_level =
+            io_busy_percent < IO_BUSY_LOW_MAX_PERCENT ? "BASSO" :
+            io_busy_percent < IO_BUSY_MEDIUM_MAX_PERCENT ? "MEDIO" : "ALTO";
+
         printf(
-            "Utilizzo CPU: %.2f%% | I/O lettura: %.2f MB/s | "
-            "I/O scrittura: %.2f MB/s | Attivita media dischi: %.2f%%\n",
-            cpu_usage,
-            read_mbps,
-            write_mbps,
-            io_busy_percent
+            "\033[2J\033[H"
+            "TELEMETRIA SISTEMA\n"
+            "Aggiornamento in corso %c\n\n"
+            "Utilizzo CPU: %s\n"
+            "Attivita I/O: %s\n",
+            spinner[refresh % (sizeof(spinner) / sizeof(spinner[0]))],
+            cpu_level,
+            io_level
         );
         fflush(stdout);
+        refresh++;
 
         previous = current;
         previous_io = current_io;

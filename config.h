@@ -7,9 +7,15 @@
 #define RAPL_ENERGY_PATH        "/sys/class/powercap/intel-rapl:0/energy_uj"
 
 /* Temporizzazione ciclo principale (500 ms = 2 Hz) */
-#define SAMPLE_INTERVAL_MS      500L
+#define SAMPLE_INTERVAL_MS      1000L
 #define NS_PER_MS               1000000L
 #define NS_PER_SEC              1000000000L
+
+/* Soglie per la classificazione sintetica della telemetria */
+#define CPU_LOAD_LOW_MAX_PERCENT        30.0
+#define CPU_LOAD_MEDIUM_MAX_PERCENT     70.0
+#define IO_BUSY_LOW_MAX_PERCENT         20.0
+#define IO_BUSY_MEDIUM_MAX_PERCENT      70.0
 
 /* Soglie termiche FusionModule800 (corridoio caldo, gradi Celsius) con isteresi */
 #define TEMP_WARN_ENTER_C       32.0f
