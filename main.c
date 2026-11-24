@@ -22,6 +22,101 @@ typedef struct {
     unsigned int devices;
 } io_stats_t;
 
+static unsigned long long cpu_total_time(const cpu_times_t *times)
+{
+    return times->user + times->nice + times->system +
+        times->idle + times->iowait + times->irq +
+        times->softirq + times->steal;
+}
+
+static double cpu_usage_percent(
+    const cpu_times_t *previous,
+    const cpu_times_t *current
+)
+{
+    unsigned long long previous_idle = previous->idle + previous->iowait;
+    unsigned long long current_idle = current->idle + current->iowait;
+    unsigned long long total_delta =
+        cpu_total_time(current) - cpu_total_time(previous);
+    unsigned long long idle_delta = current_idle - previous_idle;
+
+    return total_delta > 0
+        ? 100.0 * (total_delta - idle_delta) / total_delta
+        : 0.0;
+}
+
+static unsigned long long counter_delta(
+    unsigned long long previous,
+    unsigned long long current
+)
+{
+    return current >= previous ? current - previous : 0;
+}
+
+static double io_rate_mbps(
+    const io_stats_t *previous,
+    const io_stats_t *current
+)
+{
+    double sample_seconds = SAMPLE_INTERVAL_MS / 1000.0;
+    double transferred_sectors =
+        (double)counter_delta(previous->read_sectors, current->read_sectors) +
+        (double)counter_delta(
+            previous->written_sectors,
+            current->written_sectors
+        );
+
+    return transferred_sectors * 512.0 / sample_seconds / 1000000.0;
+}
+
+static const char *classify_level(
+    double value,
+    double low_max,
+    double medium_max
+)
+{
+    if (value < low_max) {
+        return "BASSO";
+    }
+    if (value < medium_max) {
+        return "MEDIO";
+    }
+    return "ALTO";
+}
+
+static void print_telemetry(
+    double cpu_usage,
+    double io_throughput,
+    unsigned int refresh
+)
+{
+    static const char spinner[] = {'|', '/', '-', '\\'};
+    const char *cpu_level = classify_level(
+        cpu_usage,
+        CPU_LOAD_LOW_MAX_PERCENT,
+        CPU_LOAD_MEDIUM_MAX_PERCENT
+    );
+    const char *io_level = classify_level(
+        io_throughput,
+        IO_RATE_LOW_MAX_MBPS,
+        IO_RATE_MEDIUM_MAX_MBPS
+    );
+
+    printf(
+        "\033[2J\033[H"
+        "TELEMETRIA SISTEMA\n"
+        "Aggiornamento in corso %c\n\n"
+        "Utilizzo CPU: %s (%.2f%%)\n"
+        "Utilizzo I/O: %s (%.2f MB/s)\n",
+        spinner[refresh % (sizeof(spinner) / sizeof(spinner[0]))],
+        cpu_level,
+        cpu_usage,
+        io_level,
+        io_throughput
+    );
+    fflush(stdout);
+}
+
 static int read_cpu_times(cpu_times_t *times)
 {
     FILE *stat = fopen("/proc/stat", "r");
@@ -86,25 +181,28 @@ static int read_io_stats(io_stats_t *stats)
         unsigned long long reads_completed;
         unsigned long long reads_merged;
         unsigned long long sectors_read;
+        unsigned long long read_time_ms;
         unsigned long long writes_completed;
         unsigned long long writes_merged;
         unsigned long long sectors_written;
         char device[128];
 
+        /* I campi intermedi servono per raggiungere i contatori dei settori. */
         int fields = sscanf(
             line,
-            "%u %u %127s %llu %llu %llu %*llu %llu %llu %llu",
+            "%u %u %127s %llu %llu %llu %llu %llu %llu %llu",
             &major,
             &minor,
             device,
             &reads_completed,
             &reads_merged,
             &sectors_read,
+            &read_time_ms,
             &writes_completed,
             &writes_merged,
             &sectors_written
         );
-        if (fields != 9) {
+        if (fields != 10) {
             fprintf(stderr, "Formato non valido in /proc/diskstats\n");
             fclose(diskstats);
             return -1;
@@ -144,12 +242,12 @@ static int read_io_stats(io_stats_t *stats)
     return stats->devices > 0 ? 0 : -1;
 }
 
-int main() {
+int main(void)
+{
     cpu_times_t previous;
     cpu_times_t current;
     io_stats_t previous_io;
     io_stats_t current_io;
-    const char spinner[] = {'|', '/', '-', '\\'};
     unsigned int refresh = 0;
 
     if (read_cpu_times(&previous) != 0) {
@@ -172,61 +270,10 @@ int main() {
             return EXIT_FAILURE;
         }
 
-        unsigned long long previous_idle = previous.idle + previous.iowait;
-        unsigned long long current_idle = current.idle + current.iowait;
+        double cpu_usage = cpu_usage_percent(&previous, &current);
+        double io_throughput = io_rate_mbps(&previous_io, &current_io);
 
-        unsigned long long previous_total =
-            previous.user + previous.nice + previous.system +
-            previous_idle + previous.irq + previous.softirq +
-            previous.steal;
-        unsigned long long current_total =
-            current.user + current.nice + current.system +
-            current_idle + current.irq + current.softirq +
-            current.steal;
-
-        unsigned long long total_delta = current_total - previous_total;
-        unsigned long long idle_delta = current_idle - previous_idle;
-        unsigned long long busy_delta = total_delta - idle_delta;
-
-        double cpu_usage = total_delta > 0
-            ? (100.0 * busy_delta) / total_delta
-            : 0.0;
-
-        double sample_seconds = SAMPLE_INTERVAL_MS / 1000.0;
-        unsigned long long read_sectors_delta =
-            current_io.read_sectors >= previous_io.read_sectors
-            ? current_io.read_sectors - previous_io.read_sectors
-            : 0;
-        unsigned long long written_sectors_delta =
-            current_io.written_sectors >= previous_io.written_sectors
-            ? current_io.written_sectors - previous_io.written_sectors
-            : 0;
-        double io_rate_mbps =
-            (double)(read_sectors_delta + written_sectors_delta)
-                * 512.0 / sample_seconds / 1000000.0;
-
-        const char *cpu_level =
-            cpu_usage < CPU_LOAD_LOW_MAX_PERCENT ? "BASSO" :
-            cpu_usage < CPU_LOAD_MEDIUM_MAX_PERCENT ? "MEDIO" : "ALTO";
-        int io_level_index =
-            io_rate_mbps < IO_RATE_LOW_MAX_MBPS ? 0 :
-            io_rate_mbps < IO_RATE_MEDIUM_MAX_MBPS ? 1 : 2;
-        const char *io_levels[] = {"BASSO", "MEDIO", "ALTO"};
-        const char *io_level = io_levels[io_level_index];
-
-        printf(
-            "\033[2J\033[H"
-            "TELEMETRIA SISTEMA\n"
-            "Aggiornamento in corso %c\n\n"
-            "Utilizzo CPU: %s (%.2f%%)\n"
-            "Utilizzo I/O: %s (%.2f MB/s)\n",
-            spinner[refresh % (sizeof(spinner) / sizeof(spinner[0]))],
-            cpu_level,
-            cpu_usage,
-            io_level,
-            io_rate_mbps
-        );
-        fflush(stdout);
+        print_telemetry(cpu_usage, io_throughput, refresh);
         refresh++;
 
         previous = current;

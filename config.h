@@ -6,7 +6,7 @@
 #define CGROUP_BASE_PATH        "/sys/fs/cgroup"
 #define RAPL_ENERGY_PATH        "/sys/class/powercap/intel-rapl:0/energy_uj"
 
-/* Temporizzazione ciclo principale (500 ms = 2 Hz) */
+/* Intervallo di campionamento del ciclo principale (1000 ms = 1 Hz) */
 #define SAMPLE_INTERVAL_MS      1000L
 #define NS_PER_MS               1000000L
 #define NS_PER_SEC              1000000000L
