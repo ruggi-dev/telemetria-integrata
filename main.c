@@ -218,14 +218,12 @@ int main() {
             "\033[2J\033[H"
             "TELEMETRIA SISTEMA\n"
             "Aggiornamento in corso %c\n\n"
-            "Utilizzo CPU: %s\n"
-            "Utilizzo I/O: %s\n",
-            "Utilizzo CPU: %.2f%%\n",
-            "Utilizzo I/O: %.2f MB/s\n",
+            "Utilizzo CPU: %s (%.2f%%)\n"
+            "Utilizzo I/O: %s (%.2f MB/s)\n",
             spinner[refresh % (sizeof(spinner) / sizeof(spinner[0]))],
             cpu_level,
-            io_level,
             cpu_usage,
+            io_level,
             io_rate_mbps
         );
         fflush(stdout);
