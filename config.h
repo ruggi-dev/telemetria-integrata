@@ -14,8 +14,8 @@
 /* Soglie per la classificazione sintetica della telemetria */
 #define CPU_LOAD_LOW_MAX_PERCENT        30.0
 #define CPU_LOAD_MEDIUM_MAX_PERCENT     70.0
-#define IO_BUSY_LOW_MAX_PERCENT         20.0
-#define IO_BUSY_MEDIUM_MAX_PERCENT      70.0
+#define IO_RATE_LOW_MAX_MBPS            5.0
+#define IO_RATE_MEDIUM_MAX_MBPS         50.0
 
 /* Soglie termiche FusionModule800 (corridoio caldo, gradi Celsius) con isteresi */
 #define TEMP_WARN_ENTER_C       32.0f

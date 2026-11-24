@@ -19,7 +19,6 @@ typedef struct {
 typedef struct {
     unsigned long long read_sectors;
     unsigned long long written_sectors;
-    unsigned long long io_ms;
     unsigned int devices;
 } io_stats_t;
 
@@ -79,7 +78,6 @@ static int read_io_stats(io_stats_t *stats)
 
     stats->read_sectors = 0;
     stats->written_sectors = 0;
-    stats->io_ms = 0;
     stats->devices = 0;
 
     while (fgets(line, sizeof(line), diskstats) != NULL) {
@@ -88,35 +86,25 @@ static int read_io_stats(io_stats_t *stats)
         unsigned long long reads_completed;
         unsigned long long reads_merged;
         unsigned long long sectors_read;
-        unsigned long long read_ms;
         unsigned long long writes_completed;
         unsigned long long writes_merged;
         unsigned long long sectors_written;
-        unsigned long long write_ms;
-        unsigned long long io_in_progress;
-        unsigned long long io_ms;
-        unsigned long long weighted_io_ms;
         char device[128];
 
         int fields = sscanf(
             line,
-            "%u %u %127s %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu",
+            "%u %u %127s %llu %llu %llu %*llu %llu %llu %llu",
             &major,
             &minor,
             device,
             &reads_completed,
             &reads_merged,
             &sectors_read,
-            &read_ms,
             &writes_completed,
             &writes_merged,
-            &sectors_written,
-            &write_ms,
-            &io_in_progress,
-            &io_ms,
-            &weighted_io_ms
+            &sectors_written
         );
-        if (fields != 14) {
+        if (fields != 9) {
             fprintf(stderr, "Formato non valido in /proc/diskstats\n");
             fclose(diskstats);
             return -1;
@@ -143,7 +131,6 @@ static int read_io_stats(io_stats_t *stats)
 
         stats->read_sectors += sectors_read;
         stats->written_sectors += sectors_written;
-        stats->io_ms += io_ms;
         stats->devices++;
     }
 
@@ -205,28 +192,41 @@ int main() {
             ? (100.0 * busy_delta) / total_delta
             : 0.0;
 
-        double io_busy_percent =
-            current_io.io_ms >= previous_io.io_ms
-            ? 100.0 * (current_io.io_ms - previous_io.io_ms)
-                / (SAMPLE_INTERVAL_MS * current_io.devices)
-            : 0.0;
+        double sample_seconds = SAMPLE_INTERVAL_MS / 1000.0;
+        unsigned long long read_sectors_delta =
+            current_io.read_sectors >= previous_io.read_sectors
+            ? current_io.read_sectors - previous_io.read_sectors
+            : 0;
+        unsigned long long written_sectors_delta =
+            current_io.written_sectors >= previous_io.written_sectors
+            ? current_io.written_sectors - previous_io.written_sectors
+            : 0;
+        double io_rate_mbps =
+            (double)(read_sectors_delta + written_sectors_delta)
+                * 512.0 / sample_seconds / 1000000.0;
 
         const char *cpu_level =
             cpu_usage < CPU_LOAD_LOW_MAX_PERCENT ? "BASSO" :
             cpu_usage < CPU_LOAD_MEDIUM_MAX_PERCENT ? "MEDIO" : "ALTO";
-        const char *io_level =
-            io_busy_percent < IO_BUSY_LOW_MAX_PERCENT ? "BASSO" :
-            io_busy_percent < IO_BUSY_MEDIUM_MAX_PERCENT ? "MEDIO" : "ALTO";
+        int io_level_index =
+            io_rate_mbps < IO_RATE_LOW_MAX_MBPS ? 0 :
+            io_rate_mbps < IO_RATE_MEDIUM_MAX_MBPS ? 1 : 2;
+        const char *io_levels[] = {"BASSO", "MEDIO", "ALTO"};
+        const char *io_level = io_levels[io_level_index];
 
         printf(
             "\033[2J\033[H"
             "TELEMETRIA SISTEMA\n"
             "Aggiornamento in corso %c\n\n"
             "Utilizzo CPU: %s\n"
-            "Attivita I/O: %s\n",
+            "Utilizzo I/O: %s\n",
+            "Utilizzo CPU: %.2f%%\n",
+            "Utilizzo I/O: %.2f MB/s\n",
             spinner[refresh % (sizeof(spinner) / sizeof(spinner[0]))],
             cpu_level,
-            io_level
+            io_level,
+            cpu_usage,
+            io_rate_mbps
         );
         fflush(stdout);
         refresh++;
