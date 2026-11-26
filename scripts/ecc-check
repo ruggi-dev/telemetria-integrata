@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+
+# --- Valori predefiniti (usati automaticamente se lanciato senza argomenti) ---
+HOST="172.29.2.30"
+COMMUNITY="rd_ced1_ECC800"
+MIB_DIR="$HOME/MIB"
+GROUP="all"
+TIMEOUT=3
+SHOW_NUMERIC=0
+USE_COLOR=1
+
+# --- Funzione Help ---
+usage() {
+  cat << HELP
+Uso: $(basename "$0") [OPZIONI]
+
+Interroga i sensori Huawei FusionModule800 (ECC800) via SNMPv2c.
+Se avviato senza argomenti, interroga tutti i 24 sensori usando i valori predefiniti.
+
+Opzioni:
+  -H <host>       Indirizzo IP del controller ECC800 (default: $HOST)
+  -c <community>  Community string SNMPv2c (default: $COMMUNITY)
+  -M <dir>        Cartella contenente i file MIB (default: $MIB_DIR)
+  -g <gruppo>     Categoria sensori: all | cooling | env | power | security (default: $GROUP)
+  -t <secondi>    Timeout in secondi per richiesta (default: $TIMEOUT)
+  -n              Mostra anche l'OID numerico puro (utile per il codice C)
+  -C              Disattiva i colori ANSI
+  -h              Mostra questo messaggio di aiuto
+HELP
+}
+
+# --- Parsing argomenti opzionali ---
+while getopts ":H:c:M:g:t:nCh" opt; do
+  case "$opt" in
+    H) HOST="$OPTARG" ;;
+    c) COMMUNITY="$OPTARG" ;;
+    M) MIB_DIR="$OPTARG" ;;
+    g) GROUP="$OPTARG" ;;
+    t) TIMEOUT="$OPTARG" ;;
+    n) SHOW_NUMERIC=1 ;;
+    C) USE_COLOR=0 ;;
+    h) usage; exit 0 ;;
+    :)
+      echo "Errore: l'opzione -$OPTARG richiede un argomento." >&2
+      usage >&2
+      exit 1
+      ;;
+    \?)
+      echo "Errore: opzione non valida -$OPTARG." >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+# --- Controlli preliminari ---
+if ! command -v snmpget >/dev/null 2>&1; then
+  echo "Errore: 'snmpget' non trovato. Installa il pacchetto 'snmp'." >&2
+  exit 1
+fi
+
+if [[ ! -d "$MIB_DIR" ]]; then
+  echo "Errore: la directory MIB '$MIB_DIR' non esiste." >&2
+  exit 1
+fi
+
+# --- Gestione colori ANSI ---
+if [[ "$USE_COLOR" -eq 1 && -t 1 ]]; then
+  C_BOLD=$'\e[1m'
+  C_CYAN=$'\e[36m'
+  C_GREEN=$'\e[32m'
+  C_YELLOW=$'\e[33m'
+  C_RED=$'\e[31m'
+  C_GRAY=$'\e[37m'
+  C_DIM=$'\e[90m'
+  C_RESET=$'\e[0m'
+else
+  C_BOLD=""
+  C_CYAN=""
+  C_GREEN=""
+  C_YELLOW=""
+  C_RED=""
+  C_GRAY=""
+  C_DIM=""
+  C_RESET=""
+fi
+
+# --- Definizione gruppi di OID ---
+OIDS_COOLING=(
+  "HUAWEI-ECC-MIB::hwNetCol5000A010AverageSupplyAirTemperature.4121"
+  "HUAWEI-ECC-MIB::hwNetCol5000A010AverageSupplyAirTemperature.4122"
+  "HUAWEI-ECC-MIB::hwNetCol5000A010AverageReturnAirTemperature.4121"
+  "HUAWEI-ECC-MIB::hwNetCol5000A010AverageReturnAirTemperature.4122"
+  "HUAWEI-ECC-MIB::hwNetCol5000A010AverageColdAisleTemperature.4121"
+  "HUAWEI-ECC-MIB::hwNetCol5000A010AverageColdAisleTemperature.4122"
+  "HUAWEI-ECC-MIB::hwNetCol5000A010PsuInputPower.4121"
+  "HUAWEI-ECC-MIB::hwNetCol5000A010PsuInputPower.4122"
+  "HUAWEI-ECC-MIB::hwNetCol5000A010OnorOffStatusOfAirConditioner.4121"
+  "HUAWEI-ECC-MIB::hwNetCol5000A010OnorOffStatusOfAirConditioner.4122"
+)
+
+OIDS_ENV=(
+  "HUAWEI-ECC-MIB::hwTempHumTempSensor.4123"
+  "HUAWEI-ECC-MIB::hwTempHumTempSensor.4124"
+  "HUAWEI-ECC-MIB::hwTempHumHumSensor.4123"
+  "HUAWEI-ECC-MIB::hwTempHumHumSensor.4124"
+)
+
+OIDS_POWER=(
+  "HUAWEI-ECC-MIB::hwUPS2000GAOutputActivePower.4118"
+  "HUAWEI-ECC-MIB::hwUPS2000GAOutputActivePower.4119"
+  "HUAWEI-ECC-MIB::hwUPS2000GALoadRatio.4118"
+  "HUAWEI-ECC-MIB::hwUPS2000GALoadRatio.4119"
+  "HUAWEI-ECC-MIB::hwUPS2000GAPowerMode.4118"
+  "HUAWEI-ECC-MIB::hwUPS2000GAPowerMode.4119"
+  "HUAWEI-ECC-MIB::hwPowerModuleDcOutputPower.111"
+)
+
+OIDS_SECURITY=(
+  "HUAWEI-ECC-MIB::hwECCSysAIDI1DIstatus.0"
+  "HUAWEI-ECC-MIB::hwECCSysAIDI3DIstatus.0"
+  "HUAWEI-ECC-MIB::hwAccessActuatorMagneticLockPortState.4110"
+)
+
+TARGET_OIDS=()
+case "$GROUP" in
+  all)
+    TARGET_OIDS=("${OIDS_COOLING[@]}" "${OIDS_ENV[@]}" "${OIDS_POWER[@]}" "${OIDS_SECURITY[@]}")
+    ;;
+  cooling)
+    TARGET_OIDS=("${OIDS_COOLING[@]}")
+    ;;
+  env)
+    TARGET_OIDS=("${OIDS_ENV[@]}")
+    ;;
+  power)
+    TARGET_OIDS=("${OIDS_POWER[@]}")
+    ;;
+  security)
+    TARGET_OIDS=("${OIDS_SECURITY[@]}")
+    ;;
+  *)
+    echo "Errore: gruppo '$GROUP' non riconosciuto. Usa: all, cooling, env, power, security." >&2
+    exit 1
+    ;;
+esac
+
+# --- Ciclo principale: interroga ogni OID e garantisce sempre un output leggibile ---
+for target in "${TARGET_OIDS[@]}"; do
+  raw_out=$(snmpget -v 2c -c "$COMMUNITY" -t "$TIMEOUT" -M "$MIB_DIR" -m ALL "$HOST" "$target" 2>&1)
+  rc=$?
+
+  sym="${target%.*}"
+  desc=$(snmptranslate -Td -M "$MIB_DIR" -m ALL "$sym" 2>/dev/null \
+    | sed -n '/DESCRIPTION/,/::=/p' \
+    | sed '$d' \
+    | tr '\n' ' ' \
+    | sed 's/DESCRIPTION[[:space:]]*//; s/  */ /g')
+
+  if [[ $rc -eq 0 && "$raw_out" == *"="* ]]; then
+    oid="${raw_out%%=*}"
+    val="${raw_out#*=}"
+    oid=$(echo "$oid" | xargs)
+    val=$(echo "$val" | xargs)
+
+    printf "${C_BOLD}NOME:${C_RESET}        ${C_CYAN}%s${C_RESET}\n" "$oid"
+    if [[ "$SHOW_NUMERIC" -eq 1 ]]; then
+      num_oid=$(snmptranslate -On -M "$MIB_DIR" -m ALL "$oid" 2>/dev/null)
+      printf "${C_BOLD}OID NUM:${C_RESET}     ${C_YELLOW}%s${C_RESET}\n" "$num_oid"
+    fi
+    printf "${C_BOLD}VALORE:${C_RESET}      ${C_GREEN}%s${C_RESET}\n" "$val"
+  else
+    printf "${C_BOLD}NOME:${C_RESET}        ${C_CYAN}%s${C_RESET}\n" "$target"
+    printf "${C_BOLD}ERRORE:${C_RESET}      ${C_RED}%s${C_RESET}\n" "$raw_out"
+  fi
+
+  printf "${C_BOLD}DESCRIPTION:${C_RESET} ${C_GRAY}%s${C_RESET}\n" "${desc:-Descrizione non trovata nel MIB}"
+  printf "${C_DIM}────────────────────────────────────────────────────────────${C_RESET}\n"
+done
