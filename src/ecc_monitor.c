@@ -18,30 +18,109 @@
 #define MAX_PATH_LENGTH 4096
 #define VALUE_BUFFER_SIZE 512
 
-/* Conserva il nome MIB leggibile e l'OID numerico richiesto da Net-SNMP. */
+typedef enum {
+    SENSOR_NAME_SIMPLE,
+    SENSOR_NAME_MIB,
+    SENSOR_NAME_BOTH
+} sensor_name_mode_t;
+
+/* Conserva nome leggibile, OID e unità/scala del valore del sensore. */
 typedef struct {
+    const char *simple_name;
     const char *oid_text;
     oid oid_value[MAX_OID_LEN];
     size_t oid_length;
+    unsigned int scale_factor;
+    const char *unit;
 } sensor_t;
 
 /* Sensori interrogati a ogni ciclo; l'ordine qui determina quello dell'output. */
 static sensor_t sensors[] = {
-    {.oid_text = "HUAWEI-ECC-MIB::hwNetCol5000A010AverageSupplyAirTemperature.4121"},
-    {.oid_text = "HUAWEI-ECC-MIB::hwNetCol5000A010AverageSupplyAirTemperature.4122"},
-    {.oid_text = "HUAWEI-ECC-MIB::hwNetCol5000A010AverageReturnAirTemperature.4121"},
-    {.oid_text = "HUAWEI-ECC-MIB::hwNetCol5000A010AverageReturnAirTemperature.4122"},
-    {.oid_text = "HUAWEI-ECC-MIB::hwNetCol5000A010AverageColdAisleTemperature.4121"},
-    {.oid_text = "HUAWEI-ECC-MIB::hwNetCol5000A010AverageColdAisleTemperature.4122"},
-    {.oid_text = "HUAWEI-ECC-MIB::hwNetCol5000A010PsuInputPower.4121"},
-    {.oid_text = "HUAWEI-ECC-MIB::hwNetCol5000A010PsuInputPower.4122"},
-    {.oid_text = "HUAWEI-ECC-MIB::hwTempHumTempSensor.4123"},
-    {.oid_text = "HUAWEI-ECC-MIB::hwTempHumTempSensor.4124"},
-    {.oid_text = "HUAWEI-ECC-MIB::hwUPS2000GAOutputActivePower.4118"},
-    {.oid_text = "HUAWEI-ECC-MIB::hwUPS2000GAOutputActivePower.4119"},
-    {.oid_text = "HUAWEI-ECC-MIB::hwUPS2000GALoadRatio.4118"},
-    {.oid_text = "HUAWEI-ECC-MIB::hwUPS2000GALoadRatio.4119"},
-    {.oid_text = "HUAWEI-ECC-MIB::hwPowerModuleDcOutputPower.111"}
+    {
+        .simple_name = "Aria fredda di mandata - Condizionatore 1",
+        .oid_text = "HUAWEI-ECC-MIB::hwNetCol5000A010AverageSupplyAirTemperature.4121",
+        .scale_factor = 10, .unit = "°C"
+    },
+    {
+        .simple_name = "Aria fredda di mandata - Condizionatore 2",
+        .oid_text = "HUAWEI-ECC-MIB::hwNetCol5000A010AverageSupplyAirTemperature.4122",
+        .scale_factor = 10, .unit = "°C"
+    },
+    {
+        .simple_name = "Aria calda di ritorno - Condizionatore 1",
+        .oid_text = "HUAWEI-ECC-MIB::hwNetCol5000A010AverageReturnAirTemperature.4121",
+        .scale_factor = 10, .unit = "°C"
+    },
+    {
+        .simple_name = "Aria calda di ritorno - Condizionatore 2",
+        .oid_text = "HUAWEI-ECC-MIB::hwNetCol5000A010AverageReturnAirTemperature.4122",
+        .scale_factor = 10, .unit = "°C"
+    },
+    {
+        .simple_name = "Temperatura corridoio freddo - Condizionatore 1",
+        .oid_text = "HUAWEI-ECC-MIB::hwNetCol5000A010AverageColdAisleTemperature.4121",
+        .scale_factor = 10, .unit = "°C"
+    },
+    {
+        .simple_name = "Temperatura corridoio freddo - Condizionatore 2",
+        .oid_text = "HUAWEI-ECC-MIB::hwNetCol5000A010AverageColdAisleTemperature.4122",
+        .scale_factor = 10, .unit = "°C"
+    },
+    {
+        .simple_name = "Assorbimento PSU - Condizionatore 1",
+        .oid_text = "HUAWEI-ECC-MIB::hwNetCol5000A010PsuInputPower.4121",
+        .scale_factor = 1, .unit = "W"
+    },
+    {
+        .simple_name = "Assorbimento PSU - Condizionatore 2",
+        .oid_text = "HUAWEI-ECC-MIB::hwNetCol5000A010PsuInputPower.4122",
+        .scale_factor = 1, .unit = "W"
+    },
+    {
+        .simple_name = "Temperatura zona calda - Sonda T/H 1",
+        .oid_text = "HUAWEI-ECC-MIB::hwTempHumTempSensor.4123",
+        .scale_factor = 10, .unit = "°C"
+    },
+    {
+        .simple_name = "Temperatura corridoio freddo - Sonda T/H 2",
+        .oid_text = "HUAWEI-ECC-MIB::hwTempHumTempSensor.4124",
+        .scale_factor = 10, .unit = "°C"
+    },
+    {
+        .simple_name = "Umidita relativa zona calda - Sonda T/H 1",
+        .oid_text = "HUAWEI-ECC-MIB::hwTempHumHumSensor.4123",
+        .scale_factor = 10, .unit = "%RH"
+    },
+    {
+        .simple_name = "Umidita relativa corridoio freddo - Sonda T/H 2",
+        .oid_text = "HUAWEI-ECC-MIB::hwTempHumHumSensor.4124",
+        .scale_factor = 10, .unit = "%RH"
+    },
+    {
+        .simple_name = "Potenza erogata ai server - UPS 1",
+        .oid_text = "HUAWEI-ECC-MIB::hwUPS2000GAOutputActivePower.4118",
+        .scale_factor = 10, .unit = "kW"
+    },
+    {
+        .simple_name = "Potenza erogata ai server - UPS 2",
+        .oid_text = "HUAWEI-ECC-MIB::hwUPS2000GAOutputActivePower.4119",
+        .scale_factor = 10, .unit = "kW"
+    },
+    {
+        .simple_name = "Carico UPS 1",
+        .oid_text = "HUAWEI-ECC-MIB::hwUPS2000GALoadRatio.4118",
+        .scale_factor = 10, .unit = "%"
+    },
+    {
+        .simple_name = "Carico UPS 2",
+        .oid_text = "HUAWEI-ECC-MIB::hwUPS2000GALoadRatio.4119",
+        .scale_factor = 10, .unit = "%"
+    },
+    {
+        .simple_name = "Potenza DC - Raddrizzatore 1",
+        .oid_text = "HUAWEI-ECC-MIB::hwPowerModuleDcOutputPower.111",
+        .scale_factor = 10, .unit = "W"
+    }
 };
 
 #define SENSOR_COUNT (sizeof(sensors) / sizeof(sensors[0]))
@@ -51,9 +130,11 @@ static void print_usage(const char *program)
 {
     printf(
         "Uso: %s [-H host] [-M directory_mib] [-o file_csv] "
-        "[-d durata_secondi] [-i intervallo_secondi]\n"
+        "[-d durata_secondi] [-i intervallo_secondi] "
+        "[-n semplice|mib|entrambi]\n"
         "La community SNMPv2c va impostata nella variabile "
         "d'ambiente ECC_COMMUNITY.\n"
+        "-n sceglie i nomi mostrati a terminale (default: semplice).\n"
         "Default: host %s, durata %d s, intervallo %d s, "
         "CSV %s/ecc-monitor_YYYY-MM-DD_HH-MM-SS.csv.\n",
         program,
@@ -62,6 +143,54 @@ static void print_usage(const char *program)
         DEFAULT_INTERVAL_SECONDS,
         DEFAULT_CSV_DIRECTORY
     );
+}
+
+/* Converte il valore dell'opzione -n nella modalità di visualizzazione. */
+static int parse_sensor_name_mode(
+    const char *text,
+    sensor_name_mode_t *mode
+)
+{
+    if (strcmp(text, "semplice") == 0) {
+        *mode = SENSOR_NAME_SIMPLE;
+    } else if (strcmp(text, "mib") == 0) {
+        *mode = SENSOR_NAME_MIB;
+    } else if (strcmp(text, "entrambi") == 0) {
+        *mode = SENSOR_NAME_BOTH;
+    } else {
+        return -1;
+    }
+    return 0;
+}
+
+/* Prepara il nome del sensore da mostrare secondo la modalità scelta. */
+static int format_sensor_identifier(
+    char *buffer,
+    size_t buffer_size,
+    const sensor_t *sensor,
+    sensor_name_mode_t mode
+)
+{
+    int written;
+    if (mode == SENSOR_NAME_SIMPLE) {
+        written = snprintf(buffer, buffer_size, "%s", sensor->simple_name);
+    } else if (mode == SENSOR_NAME_MIB) {
+        written = snprintf(buffer, buffer_size, "%s", sensor->oid_text);
+    } else {
+        written = snprintf(
+            buffer,
+            buffer_size,
+            "%s | %s",
+            sensor->simple_name,
+            sensor->oid_text
+        );
+    }
+
+    if (written < 0 || (size_t)written >= buffer_size) {
+        errno = ENOSPC;
+        return -1;
+    }
+    return 0;
 }
 
 /* Convalida una durata in secondi e la converte in unsigned int. */
@@ -165,19 +294,79 @@ static int csv_write_field(FILE *csv, const char *field)
     return fputc('"', csv) == EOF ? -1 : 0;
 }
 
+/* Aggiunge al valore SNMP grezzo la conversione e l'unità dichiarata nel MIB. */
+static int append_sensor_unit(
+    char *value,
+    size_t value_size,
+    const sensor_t *sensor,
+    const netsnmp_variable_list *variable
+)
+{
+    if (sensor->unit == NULL || variable->val.integer == NULL ||
+        (variable->type != ASN_INTEGER && variable->type != ASN_UNSIGNED)) {
+        return 0;
+    }
+
+    char formatted[VALUE_BUFFER_SIZE];
+    long raw_value = *variable->val.integer;
+    int written;
+
+    if (sensor->scale_factor == 10) {
+        written = snprintf(
+            formatted,
+            sizeof(formatted),
+            "%s (%.1f %s)",
+            value,
+            (double)raw_value / 10.0,
+            sensor->unit
+        );
+    } else {
+        written = snprintf(
+            formatted,
+            sizeof(formatted),
+            "%s (%ld %s)",
+            value,
+            raw_value,
+            sensor->unit
+        );
+    }
+
+    if (written < 0 || (size_t)written >= sizeof(formatted) ||
+        (size_t)written >= value_size) {
+        errno = ENOSPC;
+        return -1;
+    }
+
+    memcpy(value, formatted, (size_t)written + 1);
+    return 0;
+}
+
 /* Stampa un campione sul terminale e lo salva nel file CSV. */
 static int save_and_print(
     FILE *csv,
     const char *timestamp,
     const sensor_t *sensor,
-    const char *value
+    const char *value,
+    sensor_name_mode_t name_mode
 )
 {
-    /* L'allineamento rende più facile leggere gli OID lunghi sul terminale. */
-    printf("%-90s %s\n", sensor->oid_text, value);
+    char identifier[VALUE_BUFFER_SIZE];
+    if (format_sensor_identifier(
+            identifier,
+            sizeof(identifier),
+            sensor,
+            name_mode
+        ) != 0) {
+        return -1;
+    }
 
-    /* L'ordine delle colonne corrisponde all'intestazione scritta in main. */
+    /* L'allineamento rende leggibili sia i nomi semplici sia gli OID lunghi. */
+    printf("%-78s %s\n", identifier, value);
+
+    /* Il CSV conserva sempre nome comprensibile e OID per identificare il dato. */
     if (csv_write_field(csv, timestamp) != 0 ||
+        fputc(',', csv) == EOF ||
+        csv_write_field(csv, sensor->simple_name) != 0 ||
         fputc(',', csv) == EOF ||
         csv_write_field(csv, sensor->oid_text) != 0 ||
         fputc(',', csv) == EOF ||
@@ -197,7 +386,8 @@ static int save_and_print(
 static int record_cycle_error(
     FILE *csv,
     const char *timestamp,
-    const char *error
+    const char *error,
+    sensor_name_mode_t name_mode
 )
 {
     /* Mantiene una riga per ciascun sensore anche quando il ciclo fallisce. */
@@ -208,7 +398,13 @@ static int record_cycle_error(
             errno = ENOSPC;
             return -1;
         }
-        if (save_and_print(csv, timestamp, &sensors[index], value) != 0) {
+        if (save_and_print(
+                csv,
+                timestamp,
+                &sensors[index],
+                value,
+                name_mode
+            ) != 0) {
             return -1;
         }
     }
@@ -220,7 +416,8 @@ static int poll_sensors(
     netsnmp_session *session,
     FILE *csv,
     const char *host,
-    unsigned int cycle
+    unsigned int cycle,
+    sensor_name_mode_t name_mode
 )
 {
     char timestamp[64];
@@ -231,8 +428,11 @@ static int poll_sensors(
 
     /* La tabella a terminale precede i risultati del ciclo corrente. */
     printf("\n[%s] Ciclo %u - IP: %s\n", timestamp, cycle, host);
-    printf("%-90s %s\n", "OID", "VALORE");
-    printf("--------------------------------------------------------------------------------\n");
+    const char *identifier_header = name_mode == SENSOR_NAME_SIMPLE
+        ? "SENSORE"
+        : (name_mode == SENSOR_NAME_MIB ? "OID MIB" : "SENSORE | OID MIB");
+    printf("%-78s %s\n", identifier_header, "VALORE");
+    printf("----------------------------------------------------------------------------------------------\n");
 
     /* La richiesta GET raggruppa tutti gli OID in una singola interrogazione. */
     netsnmp_pdu *request = snmp_pdu_create(SNMP_MSG_GET);
@@ -264,7 +464,7 @@ static int poll_sensors(
             : (status == STAT_SUCCESS && response != NULL
                 ? snmp_errstring(response->errstat)
                 : "errore di comunicazione SNMP");
-        int result = record_cycle_error(csv, timestamp, error);
+        int result = record_cycle_error(csv, timestamp, error, name_mode);
         if (response != NULL) {
             snmp_free_pdu(response);
         }
@@ -295,11 +495,25 @@ static int poll_sensors(
                         *character = ' ';
                     }
                 }
+                if (append_sensor_unit(
+                        value,
+                        sizeof(value),
+                        &sensors[index],
+                        variable
+                    ) != 0) {
+                    snprintf(value, sizeof(value), "Valore troppo lungo");
+                }
             }
             variable = variable->next_variable;
         }
 
-        if (save_and_print(csv, timestamp, &sensors[index], value) != 0) {
+        if (save_and_print(
+                csv,
+                timestamp,
+                &sensors[index],
+                value,
+                name_mode
+            ) != 0) {
             snmp_free_pdu(response);
             return -1;
         }
@@ -350,10 +564,11 @@ int main(int argc, char **argv)
     const char *csv_path = NULL;
     unsigned int duration = DEFAULT_DURATION_SECONDS;
     unsigned int interval = DEFAULT_INTERVAL_SECONDS;
+    sensor_name_mode_t name_mode = SENSOR_NAME_SIMPLE;
     int option;
 
     /* Applica gli eventuali parametri passati dall'utente. */
-    while ((option = getopt(argc, argv, "H:M:o:d:i:h")) != -1) {
+    while ((option = getopt(argc, argv, "H:M:o:d:i:n:h")) != -1) {
         switch (option) {
         case 'H':
             host = optarg;
@@ -373,6 +588,17 @@ int main(int argc, char **argv)
         case 'i':
             if (parse_positive_seconds(optarg, &interval) != 0) {
                 fprintf(stderr, "Intervallo non valido: %s\n", optarg);
+                return EXIT_FAILURE;
+            }
+            break;
+        case 'n':
+            if (parse_sensor_name_mode(optarg, &name_mode) != 0) {
+                fprintf(
+                    stderr,
+                    "Modalita' nomi non valida: %s "
+                    "(usa semplice, mib oppure entrambi).\n",
+                    optarg
+                );
                 return EXIT_FAILURE;
             }
             break;
@@ -470,7 +696,7 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    /* Crea il file e scrive i nomi delle tre colonne prima dei campioni. */
+    /* Crea il file e scrive le colonne prima di registrare i campioni. */
     FILE *csv = fopen(csv_path, "w");
     if (csv == NULL) {
         perror(csv_path);
@@ -478,7 +704,7 @@ int main(int argc, char **argv)
         snmp_shutdown("ecc-monitor");
         return EXIT_FAILURE;
     }
-    if (fputs("\"timestamp\",\"oid\",\"valore\"\n", csv) == EOF) {
+    if (fputs("\"timestamp\",\"sensore\",\"oid\",\"valore\"\n", csv) == EOF) {
         perror("Scrittura intestazione CSV");
         fclose(csv);
         snmp_close(snmp_session);
@@ -518,7 +744,7 @@ int main(int argc, char **argv)
 
         /* Ogni ciclo interroga tutti gli OID e registra risultati o errori. */
         cycle++;
-        if (poll_sensors(snmp_session, csv, host, cycle) != 0) {
+        if (poll_sensors(snmp_session, csv, host, cycle, name_mode) != 0) {
             perror("Errore durante raccolta o salvataggio");
             exit_status = EXIT_FAILURE;
             break;

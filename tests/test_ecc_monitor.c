@@ -142,16 +142,20 @@ static void test_save_and_print(void)
 {
     FILE *csv = tmpfile();
     CHECK(csv != NULL);
-    sensor_t sensor = {.oid_text = "TEST-MIB::testSensor.0"};
+    sensor_t sensor = {
+        .simple_name = "Sensore di prova",
+        .oid_text = "TEST-MIB::testSensor.0"
+    };
     output_capture_t capture;
     char terminal_output[512];
     char csv_output[512];
 
     capture_start(&capture, STDOUT_FILENO);
     CHECK(save_and_print(csv, "2026-01-02 03:04:05.006",
-                         &sensor, "INTEGER: 42") == 0);
+                         &sensor, "INTEGER: 42", SENSOR_NAME_BOTH) == 0);
     capture_finish(&capture, terminal_output, sizeof(terminal_output));
 
+    CHECK(strstr(terminal_output, sensor.simple_name) != NULL);
     CHECK(strstr(terminal_output, sensor.oid_text) != NULL);
     CHECK(strstr(terminal_output, "INTEGER: 42") != NULL);
     CHECK(strstr(terminal_output, "GRUPPO") == NULL);
@@ -159,9 +163,89 @@ static void test_save_and_print(void)
     CHECK(strcmp(
         csv_output,
         "\"2026-01-02 03:04:05.006\","
-        "\"TEST-MIB::testSensor.0\",\"INTEGER: 42\"\n"
+        "\"Sensore di prova\",\"TEST-MIB::testSensor.0\",\"INTEGER: 42\"\n"
     ) == 0);
     CHECK(fclose(csv) == 0);
+}
+
+static void test_sensor_name_modes(void)
+{
+    sensor_name_mode_t mode = SENSOR_NAME_SIMPLE;
+    char identifier[VALUE_BUFFER_SIZE];
+
+    CHECK(parse_sensor_name_mode("semplice", &mode) == 0);
+    CHECK(mode == SENSOR_NAME_SIMPLE);
+    CHECK(parse_sensor_name_mode("mib", &mode) == 0);
+    CHECK(mode == SENSOR_NAME_MIB);
+    CHECK(parse_sensor_name_mode("entrambi", &mode) == 0);
+    CHECK(mode == SENSOR_NAME_BOTH);
+    CHECK(parse_sensor_name_mode("altro", &mode) == -1);
+
+    CHECK(format_sensor_identifier(
+        identifier, sizeof(identifier), &sensors[0], SENSOR_NAME_SIMPLE
+    ) == 0);
+    CHECK(strcmp(identifier, sensors[0].simple_name) == 0);
+
+    CHECK(format_sensor_identifier(
+        identifier, sizeof(identifier), &sensors[0], SENSOR_NAME_MIB
+    ) == 0);
+    CHECK(strcmp(identifier, sensors[0].oid_text) == 0);
+
+    CHECK(format_sensor_identifier(
+        identifier, sizeof(identifier), &sensors[0], SENSOR_NAME_BOTH
+    ) == 0);
+    CHECK(strstr(identifier, sensors[0].simple_name) != NULL);
+    CHECK(strstr(identifier, sensors[0].oid_text) != NULL);
+}
+
+static void test_sensor_unit_conversion(void)
+{
+    char value[VALUE_BUFFER_SIZE];
+    long raw_value = 164;
+    netsnmp_variable_list variable = {
+        .type = ASN_INTEGER,
+        .val.integer = &raw_value
+    };
+
+    snprintf(value, sizeof(value), "INTEGER: %ld", raw_value);
+    CHECK(append_sensor_unit(value, sizeof(value), &sensors[0], &variable) == 0);
+    CHECK(strcmp(value, "INTEGER: 164 (16.4 °C)") == 0);
+
+    raw_value = 456;
+    variable.type = ASN_UNSIGNED;
+    snprintf(value, sizeof(value), "Gauge32: %ld", raw_value);
+    CHECK(append_sensor_unit(value, sizeof(value), &sensors[10], &variable) == 0);
+    CHECK(strcmp(value, "Gauge32: 456 (45.6 %RH)") == 0);
+
+    raw_value = 10;
+    variable.type = ASN_INTEGER;
+    snprintf(value, sizeof(value), "INTEGER: %ld", raw_value);
+    CHECK(append_sensor_unit(value, sizeof(value), &sensors[12], &variable) == 0);
+    CHECK(strcmp(value, "INTEGER: 10 (1.0 kW)") == 0);
+
+    raw_value = 111;
+    variable.type = ASN_UNSIGNED;
+    snprintf(value, sizeof(value), "Gauge32: %ld", raw_value);
+    CHECK(append_sensor_unit(value, sizeof(value), &sensors[14], &variable) == 0);
+    CHECK(strcmp(value, "Gauge32: 111 (11.1 %)") == 0);
+
+    raw_value = 468;
+    variable.type = ASN_INTEGER;
+    snprintf(value, sizeof(value), "INTEGER: %ld", raw_value);
+    CHECK(append_sensor_unit(value, sizeof(value), &sensors[16], &variable) == 0);
+    CHECK(strcmp(value, "INTEGER: 468 (46.8 W)") == 0);
+
+    raw_value = 123;
+    variable.type = ASN_UNSIGNED;
+    snprintf(value, sizeof(value), "Gauge32: %ld", raw_value);
+    CHECK(append_sensor_unit(value, sizeof(value), &sensors[6], &variable) == 0);
+    CHECK(strcmp(value, "Gauge32: 123 (123 W)") == 0);
+
+    raw_value = -5;
+    variable.type = ASN_INTEGER;
+    snprintf(value, sizeof(value), "INTEGER: %ld", raw_value);
+    CHECK(append_sensor_unit(value, sizeof(value), &sensors[8], &variable) == 0);
+    CHECK(strcmp(value, "INTEGER: -5 (-0.5 °C)") == 0);
 }
 
 static void test_record_cycle_error(void)
@@ -174,14 +258,17 @@ static void test_record_cycle_error(void)
 
     capture_start(&capture, STDOUT_FILENO);
     CHECK(record_cycle_error(csv, "2026-01-02 03:04:05.006",
-                             "timeout SNMP") == 0);
+                             "timeout SNMP", SENSOR_NAME_SIMPLE) == 0);
     capture_finish(&capture, terminal_output, sizeof(terminal_output));
     read_stream(csv, csv_output, sizeof(csv_output));
 
     CHECK(count_newlines(csv_output) == SENSOR_COUNT);
     CHECK(strstr(csv_output, "\"ERRORE: timeout SNMP\"") != NULL);
     CHECK(strstr(terminal_output, "ERRORE: timeout SNMP") != NULL);
-    CHECK(strstr(terminal_output, sensors[SENSOR_COUNT - 1].oid_text) != NULL);
+    CHECK(strstr(
+        terminal_output,
+        sensors[SENSOR_COUNT - 1].simple_name
+    ) != NULL);
     CHECK(fclose(csv) == 0);
 }
 
@@ -220,6 +307,7 @@ static void test_program_main(void)
     capture_finish(&capture, output, sizeof(output));
     CHECK(strstr(output, "Uso: ecc-monitor") != NULL);
     CHECK(strstr(output, "ECC_COMMUNITY") != NULL);
+    CHECK(strstr(output, "-n semplice|mib|entrambi") != NULL);
 
     const char *existing_community = getenv("ECC_COMMUNITY");
     char *saved_community = existing_community == NULL
@@ -372,7 +460,13 @@ static void test_poll_sensors_timeout(void)
     char csv_output[8192];
 
     capture_start(&capture, STDOUT_FILENO);
-    CHECK(poll_sensors(snmp_session, csv, "127.0.0.1", 1) == 0);
+    CHECK(poll_sensors(
+        snmp_session,
+        csv,
+        "127.0.0.1",
+        1,
+        SENSOR_NAME_SIMPLE
+    ) == 0);
     capture_finish(&capture, terminal_output, sizeof(terminal_output));
     read_stream(csv, csv_output, sizeof(csv_output));
 
@@ -402,6 +496,12 @@ int main(void)
 
     test_save_and_print();
     puts("PASS test_save_and_print");
+
+    test_sensor_name_modes();
+    puts("PASS test_sensor_name_modes");
+
+    test_sensor_unit_conversion();
+    puts("PASS test_sensor_unit_conversion");
 
     test_record_cycle_error();
     puts("PASS test_record_cycle_error");

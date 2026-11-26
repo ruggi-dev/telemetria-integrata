@@ -54,13 +54,19 @@ i MIB da una directory e `snmp_oid_translate()` per convertire un OID numerico
 in nome simbolico o viceversa. Consultare [snmp_oid.h](./include/snmp_oid.h) per la
 firma e i formati selezionabili.
 
-Il raccoglitore interroga via SNMPv2c temperatura e potenza ogni secondo per
-20 secondi, stampa i campioni durante la lettura e li salva in
+Il raccoglitore interroga via SNMPv2c temperatura, umidità e potenza ogni
+secondo per 20 secondi, stampa i campioni durante la lettura e li salva in
 `output/ecc-monitor_YYYY-MM-DD_HH-MM-SS.csv`. La directory `tests/` è riservata
 ai test. La community non è inclusa nel sorgente: impostare
 `ECC_COMMUNITY` nell'ambiente prima dell'avvio. Sono disponibili le opzioni
 `-H` (host), `-M` (directory MIB), `-o` (file CSV), `-d` (durata in secondi)
-e `-i` (intervallo in secondi); `-h` mostra l'aiuto.
+e `-i` (intervallo in secondi). L'opzione `-n` sceglie se mostrare il nome
+semplice del sensore (predefinito), l'OID MIB o entrambi; `-h` mostra l'aiuto.
+I valori SNMP grezzi restano interi e sono mostrati insieme alla conversione
+con unità: temperature in °C, umidità relativa in %RH, potenza UPS in kW,
+rapporto di carico in percentuale e potenza DC in W.
+Il CSV conserva sempre sia il nome semplice sia l'OID, oltre a timestamp e
+valore.
 
 I sorgenti C sono in `src/`, gli header in `include/`, lo script Bash originale
 in `scripts/`, i test in `tests/` e i CSV generati in `output/`. Gli eseguibili
@@ -81,6 +87,14 @@ Per avviare il raccoglitore SNMP:
 
 ```bash
 ./build/ecc-monitor
+```
+
+Per scegliere come identificare i sensori nell'output del terminale:
+
+```bash
+./build/ecc-monitor -n semplice
+./build/ecc-monitor -n mib
+./build/ecc-monitor -n entrambi
 ```
 
 ## Test del carico
