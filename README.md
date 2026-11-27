@@ -1,111 +1,113 @@
-# Telemetria integrata
+# Integrated Telemetry
 
-Monitor di utilizzo CPU e throughput I/O dei dischi per Linux e WSL 2.
+CPU and disk I/O throughput monitors for Linux and WSL 2, plus an SNMP
+collector for the Huawei FusionModule800.
 
-## Requisiti
+## Requirements
 
-Il programma legge `/proc/stat`, `/proc/diskstats` e `/sys/dev/block`, quindi
-non funziona come applicazione nativa Windows.
+The system monitor reads `/proc/stat`, `/proc/diskstats`, and `/sys/dev/block`,
+so it does not run as a native Windows application.
 
-Su Ubuntu o Ubuntu in WSL 2 installa compilatore e `make`:
+On Ubuntu or Ubuntu on WSL 2, install the compiler and `make`:
 
 ```bash
 sudo apt update
 sudo apt install build-essential libsnmp-dev
 ```
 
-## Compilazione
+## Build
 
-Dalla cartella del progetto compila i programmi:
+Build all programs from the project directory:
 
 ```bash
 make
 ```
 
-Per compilare soltanto il raccoglitore SNMP:
+Build only the SNMP collector:
 
 ```bash
 make ecc-monitor
 ```
 
-Per eseguire i test del raccoglitore e del modulo di traduzione OID:
+Build only the OID example:
+
+```bash
+make oid-example
+```
+
+Run the collector and OID translation tests:
 
 ```bash
 make test
 ```
 
-I test non interrogano la centralina reale: il timeout SNMP viene verificato
-con un socket UDP locale. Per i test di traduzione serve il MIB Huawei in
-`$HOME/MIB`; se si trova altrove, impostare `ECC_MIB_DIR`.
+The tests do not query the live controller: SNMP timeout handling is checked
+with a local UDP socket. OID translation tests require the Huawei MIB files in
+`$HOME/MIB`; set `ECC_MIB_DIR` if they are stored elsewhere.
 
-Il Makefile usa GCC con le opzioni `-std=gnu99 -Wall -Wextra -O2`. I file
-eseguibili vengono creati nella cartella `build/`: `telemetria`,
-`esempio_oid` ed `ecc-monitor`. Per ricompilare da zero:
+The Makefile uses GCC with `-std=gnu99 -Wall -Wextra -O2`. Executables are
+created in `build/`: `system-telemetry`, `oid-example`, and `ecc-monitor`.
+To rebuild from scratch:
 
 ```bash
 make clean
 make
 ```
 
-Gli eseguibili sono `build/telemetria` e `build/esempio_oid`.
+The [snmp_oid.c](./src/snmp_oid.c) module provides `snmp_oid_init()` to load
+MIB files from a directory and `snmp_oid_translate()` to convert numeric OIDs
+to symbolic names and vice versa. See [snmp_oid.h](./include/snmp_oid.h) for
+the function signatures and supported formats.
 
-Il modulo [snmp_oid.c](./src/snmp_oid.c) fornisce `snmp_oid_init()` per caricare
-i MIB da una directory e `snmp_oid_translate()` per convertire un OID numerico
-in nome simbolico o viceversa. Consultare [snmp_oid.h](./include/snmp_oid.h) per la
-firma e i formati selezionabili.
+The SNMPv2c collector polls FusionModule800 and UPS measurements every second
+for 20 seconds, prints each sample, and saves it to
+`output/ecc-monitor_YYYY-MM-DD_HH-MM-SS.csv`. It collects temperatures,
+humidity, power, load, operating states, and rectifier measurements. The SNMP
+community is not stored in the source; set `ECC_COMMUNITY` in the environment
+before starting the collector. Available options are `-H` (host), `-M` (MIB
+directory), `-o` (CSV file), `-d` (duration in seconds), and `-i` (polling
+interval in seconds). The `-n` option selects simple sensor names (default),
+MIB OIDs, or both; `-h` displays help. Raw SNMP values are shown alongside
+their scaled values and units. The CSV always includes the timestamp, simple
+sensor name, OID, and value.
 
-Il raccoglitore interroga via SNMPv2c temperatura, umidità e potenza ogni
-secondo per 20 secondi, stampa i campioni durante la lettura e li salva in
-`output/ecc-monitor_YYYY-MM-DD_HH-MM-SS.csv`. La directory `tests/` è riservata
-ai test. La community non è inclusa nel sorgente: impostare
-`ECC_COMMUNITY` nell'ambiente prima dell'avvio. Sono disponibili le opzioni
-`-H` (host), `-M` (directory MIB), `-o` (file CSV), `-d` (durata in secondi)
-e `-i` (intervallo in secondi). L'opzione `-n` sceglie se mostrare il nome
-semplice del sensore (predefinito), l'OID MIB o entrambi; `-h` mostra l'aiuto.
-I valori SNMP grezzi restano interi e sono mostrati insieme alla conversione
-con unità: temperature in °C, umidità relativa in %RH, potenza UPS in kW,
-rapporto di carico in percentuale e potenza DC in W.
-Il CSV conserva sempre sia il nome semplice sia l'OID, oltre a timestamp e
-valore.
+C sources are in `src/`, headers in `include/`, the Bash utility in `scripts/`,
+tests in `tests/`, and generated CSV files in `output/`. Built executables are
+placed in `build/`.
 
-I sorgenti C sono in `src/`, gli header in `include/`, lo script Bash originale
-in `scripts/`, i test in `tests/` e i CSV generati in `output/`. Gli eseguibili
-compilati vengono collocati in `build/`.
-
-## Avvio
+## Run
 
 ```bash
-./build/telemetria
+./build/system-telemetry
 ```
 
-Il programma attende 500 ms tra un campione e il successivo e mostra i livelli
-CPU e I/O con i relativi valori. Il throughput I/O usa l'intervallo nominale
-di 500 ms, quindi il tempo di elaborazione può introdurre una lieve
-approssimazione. Per terminare premi `Ctrl+C`.
+The system monitor waits 500 ms between samples and displays CPU and I/O usage.
+I/O throughput is calculated using the nominal 500 ms interval, so processing
+time may introduce a small approximation. Press `Ctrl+C` to stop it.
 
-Per avviare il raccoglitore SNMP:
+To start the SNMP collector:
 
 ```bash
 ./build/ecc-monitor
 ```
 
-Per scegliere come identificare i sensori nell'output del terminale:
+Choose how sensors are identified in terminal output:
 
 ```bash
-./build/ecc-monitor -n semplice
+./build/ecc-monitor -n simple
 ./build/ecc-monitor -n mib
-./build/ecc-monitor -n entrambi
+./build/ecc-monitor -n both
 ```
 
-## Test del carico
+## Load testing
 
-Per provare la CPU o l'I/O, installa `stress-ng`:
+To generate CPU or I/O load, install `stress-ng`:
 
 ```bash
 sudo apt install stress-ng
 ```
 
-Poi esegui uno dei comandi seguenti in un secondo terminale:
+Then run one of these commands in a second terminal:
 
 ```bash
 stress-ng --cpu 0 --timeout 45s --metrics-brief
@@ -114,15 +116,14 @@ stress-ng --cpu 2 --hdd 2 --hdd-opts direct,sync --temp-path /var/tmp --timeout 
 stress-ng --cpu 0 --hdd 4 --hdd-opts direct,sync --temp-path /var/tmp --timeout 60s
 ```
 
-I primi due comandi provano separatamente CPU e I/O; gli ultimi due generano
-un carico combinato moderato e massimo. Il test I/O usa file temporanei fino a
-512 MB. In WSL, esegui il test su una directory del filesystem Linux, non su
-un percorso `/mnt/c`, per misurare meglio il traffico del disco visto dal
-programma.
+The first two commands test CPU and I/O separately; the last two generate
+moderate and high combined load. The I/O tests use temporary files up to
+512 MB. On WSL, run the test in a Linux filesystem directory, not under
+`/mnt/c`, to better measure the disk traffic seen by the program.
 
-## Pulizia
+## Cleanup
 
-Per eliminare l'eseguibile generato:
+Remove generated executables:
 
 ```bash
 make clean

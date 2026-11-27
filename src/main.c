@@ -6,21 +6,21 @@
 #include "config.h"
 
 typedef struct {
-    unsigned long long user;        // Modalita' utente
-    unsigned long long nice;        // Priorita' modificata
-    unsigned long long system;      // Modalita' kernel
-    unsigned long long idle;        // Inattivita'
-    unsigned long long iowait;      // Attesa I/O
-    unsigned long long irq;         // Interruzioni hardware
-    unsigned long long softirq;     // Interruzioni software
-    unsigned long long steal;       // Attesa hypervisor
-} cpu_times_t; // Contiene i contatori CPU accumulati da Linux
+    unsigned long long user;        // User mode
+    unsigned long long nice;        // Adjusted priority
+    unsigned long long system;      // Kernel mode
+    unsigned long long idle;        // Idle time
+    unsigned long long iowait;      // I/O wait
+    unsigned long long irq;         // Hardware interrupts
+    unsigned long long softirq;     // Software interrupts
+    unsigned long long steal;       // Time stolen by the hypervisor
+} cpu_times_t; // Accumulated CPU counters reported by Linux
 
 typedef struct {
     unsigned long long read_sectors;
     unsigned long long written_sectors;
     unsigned int devices;
-} io_stats_t; // Contiene i settori letti e scritti
+} io_stats_t; // Read and written sector counters
 
 static unsigned long long cpu_total_time(const cpu_times_t *times)
 {
@@ -76,12 +76,12 @@ static const char *classify_level(
 )
 {
     if (value < low_max) {
-        return "BASSO";
+        return "LOW";
     }
     if (value < medium_max) {
-        return "MEDIO";
+        return "MEDIUM";
     }
-    return "ALTO";
+    return "HIGH";
 }
 
 static void print_telemetry(
@@ -104,10 +104,10 @@ static void print_telemetry(
 
     printf(
         "\033[2J\033[H"
-        "TELEMETRIA SISTEMA\n"
-        "Aggiornamento in corso %c\n\n"
-        "Utilizzo CPU: %s (%.2f%%)\n"
-        "Utilizzo I/O: %s (%.2f MB/s)\n",
+        "SYSTEM TELEMETRY\n"
+        "Updating %c\n\n"
+        "CPU usage: %s (%.2f%%)\n"
+        "I/O usage: %s (%.2f MB/s)\n",
         spinner[refresh % (sizeof(spinner) / sizeof(spinner[0]))],
         cpu_level,
         cpu_usage,
@@ -123,13 +123,13 @@ static int read_cpu_times(cpu_times_t *times)
     char line[256];
 
     if (stat == NULL) {
-        perror("Errore apertura /proc/stat");
+        perror("Error opening /proc/stat");
         return -1;
     }
 
     if (fgets(line, sizeof(line), stat) == NULL) {
         fclose(stat);
-        fprintf(stderr, "Errore lettura /proc/stat\n");
+        fprintf(stderr, "Error reading /proc/stat\n");
         return -1;
     }
 
@@ -157,12 +157,12 @@ static int read_io_stats(io_stats_t *stats)
     char line[512];
 
     if (diskstats == NULL) {
-        perror("Errore apertura /proc/diskstats");
+        perror("Error opening /proc/diskstats");
         return -1;
     }
 
     if (access("/sys/dev/block", F_OK) != 0) {
-        perror("Errore accesso a /sys/dev/block");
+        perror("Error accessing /sys/dev/block");
         fclose(diskstats);
         return -1;
     }
@@ -183,7 +183,7 @@ static int read_io_stats(io_stats_t *stats)
         unsigned long long sectors_written;
         char device[128];
 
-        /* Legge i campi fino ai settori scritti, richiesti dal formato diskstats. */
+        /* Read through the written-sector fields in the diskstats format. */
         int fields = sscanf(
             line,
             "%u %u %127s %llu %llu %llu %llu %llu %llu %llu",
@@ -199,7 +199,7 @@ static int read_io_stats(io_stats_t *stats)
             &sectors_written
         );
         if (fields != 10) {
-            fprintf(stderr, "Formato non valido in /proc/diskstats\n");
+            fprintf(stderr, "Invalid format in /proc/diskstats\n");
             fclose(diskstats);
             return -1;
         }
@@ -225,7 +225,7 @@ static int read_io_stats(io_stats_t *stats)
             continue;
         }
         if (errno != ENOENT) {
-            perror("Errore verifica partizione in sysfs");
+            perror("Error checking partition in sysfs");
             fclose(diskstats);
             return -1;
         }
@@ -236,7 +236,7 @@ static int read_io_stats(io_stats_t *stats)
     }
 
     if (ferror(diskstats)) {
-        perror("Errore lettura /proc/diskstats");
+        perror("Error reading /proc/diskstats");
         fclose(diskstats);
         return -1;
     }
@@ -257,7 +257,7 @@ int main(void)
         return EXIT_FAILURE;
     }
     if (read_io_stats(&previous_io) != 0) {
-        fprintf(stderr, "Impossibile leggere le statistiche I/O\n");
+        fprintf(stderr, "Unable to read I/O statistics\n");
         return EXIT_FAILURE;
     }
 
@@ -265,11 +265,11 @@ int main(void)
 
     while (1) {
         if (read_cpu_times(&current) != 0) {
-            fprintf(stderr, "Errore lettura statistiche CPU\n");
+            fprintf(stderr, "Error reading CPU statistics\n");
             return EXIT_FAILURE;
         }
         if (read_io_stats(&current_io) != 0) {
-            fprintf(stderr, "Impossibile leggere le statistiche I/O\n");
+            fprintf(stderr, "Unable to read I/O statistics\n");
             return EXIT_FAILURE;
         }
 

@@ -8,6 +8,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "temperature_alarm.h"
+
 #define CHECK(condition) \
     do { \
         if (!(condition)) { \
@@ -143,7 +145,7 @@ static void test_save_and_print(void)
     FILE *csv = tmpfile();
     CHECK(csv != NULL);
     sensor_t sensor = {
-        .simple_name = "Sensore di prova",
+        .simple_name = "Test sensor",
         .oid_text = "TEST-MIB::testSensor.0"
     };
     output_capture_t capture;
@@ -158,12 +160,12 @@ static void test_save_and_print(void)
     CHECK(strstr(terminal_output, sensor.simple_name) != NULL);
     CHECK(strstr(terminal_output, sensor.oid_text) != NULL);
     CHECK(strstr(terminal_output, "INTEGER: 42") != NULL);
-    CHECK(strstr(terminal_output, "GRUPPO") == NULL);
+    CHECK(strstr(terminal_output, "GROUP") == NULL);
     read_stream(csv, csv_output, sizeof(csv_output));
     CHECK(strcmp(
         csv_output,
         "\"2026-01-02 03:04:05.006\","
-        "\"Sensore di prova\",\"TEST-MIB::testSensor.0\",\"INTEGER: 42\"\n"
+        "\"Test sensor\",\"TEST-MIB::testSensor.0\",\"INTEGER: 42\"\n"
     ) == 0);
     CHECK(fclose(csv) == 0);
 }
@@ -173,13 +175,13 @@ static void test_sensor_name_modes(void)
     sensor_name_mode_t mode = SENSOR_NAME_SIMPLE;
     char identifier[VALUE_BUFFER_SIZE];
 
-    CHECK(parse_sensor_name_mode("semplice", &mode) == 0);
+    CHECK(parse_sensor_name_mode("simple", &mode) == 0);
     CHECK(mode == SENSOR_NAME_SIMPLE);
     CHECK(parse_sensor_name_mode("mib", &mode) == 0);
     CHECK(mode == SENSOR_NAME_MIB);
-    CHECK(parse_sensor_name_mode("entrambi", &mode) == 0);
+    CHECK(parse_sensor_name_mode("both", &mode) == 0);
     CHECK(mode == SENSOR_NAME_BOTH);
-    CHECK(parse_sensor_name_mode("altro", &mode) == -1);
+    CHECK(parse_sensor_name_mode("other", &mode) == -1);
 
     CHECK(format_sensor_identifier(
         identifier, sizeof(identifier), &sensors[0], SENSOR_NAME_SIMPLE
@@ -248,6 +250,163 @@ static void test_sensor_unit_conversion(void)
     CHECK(strcmp(value, "INTEGER: -5 (-0.5 °C)") == 0);
 }
 
+static void test_ups_power_mode_alarm(void)
+{
+    long raw_mode = UPS_MODE_BATTERY;
+    netsnmp_variable_list variable = {
+        .type = ASN_INTEGER,
+        .val.integer = &raw_mode
+    };
+    ups_power_mode_t parsed_mode = UPS_MODE_UNKNOWN;
+    CHECK(parse_ups_power_mode(&variable, &parsed_mode) == 0);
+    CHECK(parsed_mode == UPS_MODE_BATTERY);
+
+    variable.type = ASN_UNSIGNED;
+    CHECK(parse_ups_power_mode(&variable, &parsed_mode) == -1);
+    variable.type = ASN_INTEGER;
+
+    ups_power_mode_t modes[2] = {UPS_MODE_BATTERY, UPS_MODE_MAINS};
+    int mode_valid[2] = {1, 1};
+    int alarm_active = 0;
+    output_capture_t capture;
+    char message[256];
+
+    capture_start(&capture, STDERR_FILENO);
+    update_ups_battery_alarm(modes, mode_valid, &alarm_active);
+    capture_finish(&capture, message, sizeof(message));
+    CHECK(alarm_active == 1);
+    CHECK(strstr(message, "ALERT") != NULL);
+    CHECK(strstr(message, "UPS 1") != NULL);
+
+    capture_start(&capture, STDERR_FILENO);
+    update_ups_battery_alarm(modes, mode_valid, &alarm_active);
+    capture_finish(&capture, message, sizeof(message));
+    CHECK(message[0] == '\0');
+
+    modes[0] = UPS_MODE_MAINS;
+    mode_valid[1] = 0;
+    capture_start(&capture, STDERR_FILENO);
+    update_ups_battery_alarm(modes, mode_valid, &alarm_active);
+    capture_finish(&capture, message, sizeof(message));
+    CHECK(alarm_active == 1);
+    CHECK(message[0] == '\0');
+
+    mode_valid[1] = 1;
+    capture_start(&capture, STDERR_FILENO);
+    update_ups_battery_alarm(modes, mode_valid, &alarm_active);
+    capture_finish(&capture, message, sizeof(message));
+    CHECK(alarm_active == 0);
+    CHECK(strstr(message, "RECOVERY") != NULL);
+}
+
+static void test_temperature_alarm_activation(void)
+{
+    temperature_alarm_state_t state = {0};
+    temperature_alarm_event_t event;
+
+    CHECK(temperature_alarm_update(
+        &state, 1, 300, 300, 20, 2, &event
+    ) == 0);
+    CHECK(event == TEMPERATURE_ALARM_NO_CHANGE);
+    CHECK(state.active == 0);
+
+    CHECK(temperature_alarm_update(
+        &state, 1, 301, 300, 20, 2, &event
+    ) == 0);
+    CHECK(event == TEMPERATURE_ALARM_TRIGGERED);
+    CHECK(state.active == 1);
+
+    CHECK(temperature_alarm_update(
+        &state, 1, 315, 300, 20, 2, &event
+    ) == 0);
+    CHECK(event == TEMPERATURE_ALARM_NO_CHANGE);
+    CHECK(state.active == 1);
+}
+
+static void test_temperature_alarm_recovery_hysteresis(void)
+{
+    temperature_alarm_state_t state = {
+        .active = 1
+    };
+    temperature_alarm_event_t event;
+
+    CHECK(temperature_alarm_update(
+        &state, 1, 290, 300, 20, 2, &event
+    ) == 0);
+    CHECK(event == TEMPERATURE_ALARM_NO_CHANGE);
+    CHECK(state.active == 1);
+
+    CHECK(temperature_alarm_update(
+        &state, 1, 280, 300, 20, 2, &event
+    ) == 0);
+    CHECK(event == TEMPERATURE_ALARM_NO_CHANGE);
+    CHECK(state.active == 1);
+
+    CHECK(temperature_alarm_update(
+        &state, 1, 280, 300, 20, 2, &event
+    ) == 0);
+    CHECK(event == TEMPERATURE_ALARM_RECOVERED);
+    CHECK(state.active == 0);
+}
+
+static void test_temperature_alarm_invalid_sample(void)
+{
+    temperature_alarm_state_t state = {
+        .consecutive_high_samples = 1
+    };
+    temperature_alarm_event_t event;
+
+    CHECK(temperature_alarm_update(
+        &state, 0, 320, 300, 20, 2, &event
+    ) == 0);
+    CHECK(event == TEMPERATURE_ALARM_NO_CHANGE);
+    CHECK(state.active == 0);
+    CHECK(state.consecutive_high_samples == 0);
+
+    CHECK(temperature_alarm_update(
+        &state, 1, 320, 300, 20, 2, &event
+    ) == 0);
+    CHECK(event == TEMPERATURE_ALARM_NO_CHANGE);
+    CHECK(state.active == 0);
+}
+
+static void test_temperature_alarm_sensor_states_are_independent(void)
+{
+    temperature_alarm_state_t sensor_1 = {0};
+    temperature_alarm_state_t sensor_2 = {0};
+    temperature_alarm_event_t event;
+
+    CHECK(temperature_alarm_update(
+        &sensor_1, 1, 320, 300, 0, 1, &event
+    ) == 0);
+    CHECK(event == TEMPERATURE_ALARM_TRIGGERED);
+    CHECK(sensor_1.active == 1);
+
+    CHECK(temperature_alarm_update(
+        &sensor_2, 1, 250, 300, 0, 1, &event
+    ) == 0);
+    CHECK(event == TEMPERATURE_ALARM_NO_CHANGE);
+    CHECK(sensor_2.active == 0);
+}
+
+static void test_temperature_alarm_rejects_invalid_configuration(void)
+{
+    temperature_alarm_state_t state = {0};
+    temperature_alarm_event_t event;
+
+    errno = 0;
+    CHECK(temperature_alarm_update(
+        &state, 1, 320, 300, -1, 2, &event
+    ) == -1);
+    CHECK(errno == EINVAL);
+
+    errno = 0;
+    CHECK(temperature_alarm_update(
+        &state, 1, 320, 300, 10, 0, &event
+    ) == -1);
+    CHECK(errno == EINVAL);
+}
+
 static void test_record_cycle_error(void)
 {
     FILE *csv = tmpfile();
@@ -258,13 +417,13 @@ static void test_record_cycle_error(void)
 
     capture_start(&capture, STDOUT_FILENO);
     CHECK(record_cycle_error(csv, "2026-01-02 03:04:05.006",
-                             "timeout SNMP", SENSOR_NAME_SIMPLE) == 0);
+                             "SNMP timeout", SENSOR_NAME_SIMPLE) == 0);
     capture_finish(&capture, terminal_output, sizeof(terminal_output));
     read_stream(csv, csv_output, sizeof(csv_output));
 
     CHECK(count_newlines(csv_output) == SENSOR_COUNT);
-    CHECK(strstr(csv_output, "\"ERRORE: timeout SNMP\"") != NULL);
-    CHECK(strstr(terminal_output, "ERRORE: timeout SNMP") != NULL);
+    CHECK(strstr(csv_output, "\"ERROR: SNMP timeout\"") != NULL);
+    CHECK(strstr(terminal_output, "ERROR: SNMP timeout") != NULL);
     CHECK(strstr(
         terminal_output,
         sensors[SENSOR_COUNT - 1].simple_name
@@ -305,9 +464,9 @@ static void test_program_main(void)
     capture_start(&capture, STDOUT_FILENO);
     CHECK(ecc_monitor_program_main(2, help_arguments) == EXIT_SUCCESS);
     capture_finish(&capture, output, sizeof(output));
-    CHECK(strstr(output, "Uso: ecc-monitor") != NULL);
+    CHECK(strstr(output, "Usage: ecc-monitor") != NULL);
     CHECK(strstr(output, "ECC_COMMUNITY") != NULL);
-    CHECK(strstr(output, "-n semplice|mib|entrambi") != NULL);
+    CHECK(strstr(output, "-n simple|mib|both") != NULL);
 
     const char *existing_community = getenv("ECC_COMMUNITY");
     char *saved_community = existing_community == NULL
@@ -458,6 +617,7 @@ static void test_poll_sensors_timeout(void)
     output_capture_t capture;
     char terminal_output[8192];
     char csv_output[8192];
+    int battery_alarm_active = 0;
 
     capture_start(&capture, STDOUT_FILENO);
     CHECK(poll_sensors(
@@ -465,13 +625,14 @@ static void test_poll_sensors_timeout(void)
         csv,
         "127.0.0.1",
         1,
-        SENSOR_NAME_SIMPLE
+        SENSOR_NAME_SIMPLE,
+        &battery_alarm_active
     ) == 0);
     capture_finish(&capture, terminal_output, sizeof(terminal_output));
     read_stream(csv, csv_output, sizeof(csv_output));
 
-    CHECK(strstr(terminal_output, "Ciclo 1") != NULL);
-    CHECK(strstr(terminal_output, "ERRORE: timeout SNMP") != NULL);
+    CHECK(strstr(terminal_output, "Cycle 1") != NULL);
+    CHECK(strstr(terminal_output, "ERROR: SNMP timeout") != NULL);
     CHECK(count_newlines(csv_output) == SENSOR_COUNT);
 
     CHECK(fclose(csv) == 0);
@@ -503,6 +664,24 @@ int main(void)
     test_sensor_unit_conversion();
     puts("PASS test_sensor_unit_conversion");
 
+    test_ups_power_mode_alarm();
+    puts("PASS test_ups_power_mode_alarm");
+
+    test_temperature_alarm_activation();
+    puts("PASS test_temperature_alarm_activation");
+
+    test_temperature_alarm_recovery_hysteresis();
+    puts("PASS test_temperature_alarm_recovery_hysteresis");
+
+    test_temperature_alarm_invalid_sample();
+    puts("PASS test_temperature_alarm_invalid_sample");
+
+    test_temperature_alarm_sensor_states_are_independent();
+    puts("PASS test_temperature_alarm_sensor_states_are_independent");
+
+    test_temperature_alarm_rejects_invalid_configuration();
+    puts("PASS test_temperature_alarm_rejects_invalid_configuration");
+
     test_record_cycle_error();
     puts("PASS test_record_cycle_error");
 
@@ -518,6 +697,6 @@ int main(void)
     test_poll_sensors_timeout();
     puts("PASS test_poll_sensors_timeout");
 
-    puts("Tutti i test sono stati superati.");
+    puts("All tests passed.");
     return EXIT_SUCCESS;
 }
